@@ -1,22 +1,105 @@
-//
-//
-//
+/**
+ * A quick way to create sockets and send and receive messages.
+ * 
+ * EXAMPLE OF USE:
+ * 
+ * SERVER EXAMPLE
+ *    #include <iostream>
+ *    #include "Socket.h"
+ * 
+ *    int main()
+ *     {
+ *        ServerSocket server( 50 );
+ *    
+ *         if ( server.setup( "3490" ) )
+ *         {
+ *             size_t addressCount = server.getSocketAddressCount();
+ *
+ *             int address;
+ *            for (size_t i = 0; i < addressCount; ++i)
+ *            {
+ *                const SocketAddress* socketAddress = server.getSocketAddress( i );
+ *
+ *                // Choose an address based in some criteria
+ *                address = i;
+ *            }
+ *    
+ *            if ( server.start( address ) )
+ *            {
+ *                // Wait for connection
+ *               Socket* socket = server.accept();
+ * 
+ *                if ( socket != nullptr )
+ *                {
+ *                    char* buffer = new char[bufferSize];
+ *
+ *                    // received contains the number of bytes received or 0 in case
+ *                    // the connection was closed
+ *                    ssize_t received = socket->receive( buffer, bufferSize);
+ *        
+ *                    // The function send will always try to send bufferSize bytes
+ *                    // to the remote side. sent contains the number of bytes sent
+ *                    // or -1 in case of error.
+ *                    ssize_t sent = socket->send( buffer, bufferSize );
+ *                    std::cout << "Sent " << sent << " bytes\n";
+ *                    
+ *                    delete socket;
+ *                }
+ * 
+ *                server.close();
+ *            }
+ *        }
+ *        
+ *        return 0;
+ *    }
+ * 
+ * 
+ * CLIENT EXAMPLE
+ *    #include <iostream>
+ *    #include "Socket.h"
+ * 
+ *    int main()
+ *     {
+ *        ClientSocket client;
+ *    
+ *         if ( client.setup( "192.168.0.1", "3490" ) )
+ *         {
+ *             size_t addressCount = client.getSocketAddressCount();
+ *
+ *            int address;
+ *            for (size_t i = 0; i < addressCount; ++i)
+ *            {
+ *                const SocketAddress* socketAddress = client.getSocketAddress( i );
+ *
+ *                // Choose an address based in some criteria
+ *                address = i;
+ *            }
+ *
+ *            Socket* socket = client.connect( address );
+ * 
+ *            if ( socket != nullptr )
+ *            {
+ *                // This step is the same as in SERVER EXAMPLE
+ *            }
+ * 
+ *            client.close();
+ *        }
+ *        
+ *        return 0;
+ *    }
+ */
+
+
 
 #include <iostream>
 #include <string>
 #include <cstring>
 #include <vector>
 #include <unistd.h>
-//#include <sys/types.h>
-//#include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 
 
-
-//
-//
-//
 
 enum class SocketFlags
 {
@@ -42,164 +125,166 @@ enum class SocketProtocol
     ANY = 0
 };
 
-// Internet address
+// Internet address ( IPV4ADDRESS is always in host byte order)
 typedef uint32_t IPV4ADDRESS;
 typedef unsigned char IPV6ADDRESS[16];
 
+// Port number (always in host byte order)
 typedef uint16_t PORT;
 
+// Used only by IPv6 addresses
 typedef uint32_t IPV6FLOWINFO;
 typedef uint32_t IPV6SCOPEID;
 
 
 
-//
-//
-//
-
+/**
+ * This class is used to convert system socket types to the types defined in this
+ * file and vice-versa.
+ */
 class SocketParameterConverter
 {
     public:
 
-    static void getParam( int type, SocketFlags& flag )
+    static void getParam( int from, SocketFlags& to )
     {
-        switch ( type )
-        {
+        switch ( from )
+        { 
             case AI_PASSIVE:
-                flag = SocketFlags::PASSIVE;
+                to = SocketFlags::PASSIVE;
                 break;
                 
             case AI_CANONNAME:
-                flag = SocketFlags::CANONICALNAME;
+                to = SocketFlags::CANONICALNAME;
                 break;
                 
             default:
-                flag = SocketFlags::PASSIVE;
+                to = SocketFlags::PASSIVE;
                 break;
         }
     }
     
-    static void getParam( int type, SocketFamily& family )
+    static void getParam( int from, SocketFamily& to )
     {
-        switch ( type )
+        switch ( from )
         {
             case AF_UNSPEC:
-                family = SocketFamily::UNSPECIFIED;
+                to = SocketFamily::UNSPECIFIED;
                 break;
                 
             case AF_INET:
-                family = SocketFamily::IPV4;
+                to = SocketFamily::IPV4;
                 break;
                 
             case AF_INET6:
-                family = SocketFamily::IPV6;
+                to = SocketFamily::IPV6;
                 break;
                 
             default:
-                family = SocketFamily::UNSPECIFIED;
+                to = SocketFamily::UNSPECIFIED;
                 break;
         }
     }
     
-    static void getParam( int type, SocketType& socketType )
+    static void getParam( int from, SocketType& to )
     {
-        switch ( type )
+        switch ( from )
         {
             case SOCK_STREAM:
-                socketType = SocketType::STREAM;
+                to = SocketType::STREAM;
                 break;
                 
             case SOCK_DGRAM:
-                socketType = SocketType::DATAGRAM;
+                to = SocketType::DATAGRAM;
                 break;
                 
             default:
-                socketType = SocketType::STREAM;
+                to = SocketType::STREAM;
                 break;
         }
     }
     
-    static void getParam( int type, SocketProtocol& protocol )
+    static void getParam( int from, SocketProtocol& to )
     {
-        switch ( type )
+        switch ( from )
         {
             case 0:
-                protocol = SocketProtocol::ANY;
+                to = SocketProtocol::ANY;
                 break;
                 
             default:
-                protocol = SocketProtocol::ANY;
+                to = SocketProtocol::ANY;
                 break;
         }
     }
     
-    static void getParam( SocketFlags flag, int& type )
+    static void getParam( SocketFlags from, int& to )
     {
-        switch ( flag )
+        switch ( from )
         {
             case SocketFlags::PASSIVE:
-                type = AI_PASSIVE;
+                to = AI_PASSIVE;
                 break;
                 
             case SocketFlags::CANONICALNAME:
-                type = AI_CANONNAME;
+                to = AI_CANONNAME;
                 break;
             
             default:
-                type = AI_PASSIVE;
+                to = AI_PASSIVE;
         }
     }
     
-    static void getParam( SocketFamily family, int& type )
+    static void getParam( SocketFamily from, int& to )
     {
-        switch ( family )
+        switch ( from )
         {
             case SocketFamily::UNSPECIFIED:
-                type = AF_UNSPEC;
+                to = AF_UNSPEC;
                 break;
                 
             case SocketFamily::IPV4:
-                type = AF_INET;
+                to = AF_INET;
                 break;
                 
             case SocketFamily::IPV6:
-                type = AF_INET6;
+                to = AF_INET6;
                 break;
                 
             default:
-                type = AF_UNSPEC;
+                to = AF_UNSPEC;
                 break;
         }
     }
     
-    static void getParam( SocketType socketType, int& type )
+    static void getParam( SocketType from, int& to )
     {
-        switch ( socketType )
+        switch ( from )
         {
             case SocketType::STREAM:
-                type = SOCK_STREAM;
+                to = SOCK_STREAM;
                 break;
                 
             case SocketType::DATAGRAM:
-                type = SOCK_DGRAM;
+                to = SOCK_DGRAM;
                 break;
                 
             default:
-                type = SOCK_STREAM;
+                to = SOCK_STREAM;
                 break;
         }
     }
     
-    static void getParam( SocketProtocol protocol, int& type )
+    static void getParam( SocketProtocol from, int& to )
     {
-        switch ( protocol )
+        switch ( from )
         {
             case SocketProtocol::ANY:
-                type = 0;
+                to = 0;
                 break;
                 
             default:
-                type = 0;
+                to = 0;
                 break;
         }
     }
@@ -207,10 +292,9 @@ class SocketParameterConverter
 
 
 
-//
-//
-//
-
+/**
+ * This class holds information about Internet address.
+ */
 class SocketAddress
 {
     public:
@@ -264,12 +348,12 @@ class SocketAddress
         
         inet_pton( AF_INET, address.c_str(), &(sa.sin_addr) );
         
-        mIPv4Address = sa.sin_addr.s_addr;
+        setIPv4Address( ntohl( sa.sin_addr.s_addr ) );
     }
     
-    void setIPv6Address( unsigned char address[16] )
+    void setIPv6Address( IPV6ADDRESS address )
     {
-        memcpy( mIPv6Address, address, sizeof( unsigned char ) * 16 );
+        memcpy( mIPv6Address, address, sizeof( IPV6ADDRESS ) );
     }
     
     void setIPv6Address( const std::string& address )
@@ -324,7 +408,8 @@ class SocketAddress
     void getIPv4Address( std::string& address ) const
     {
         char ipv4[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &mIPv4Address, ipv4, INET_ADDRSTRLEN);
+        IPV4ADDRESS nboIPv4 = htonl( mIPv4Address );
+        inet_ntop(AF_INET, &nboIPv4, ipv4, INET_ADDRSTRLEN);
         
         address = ipv4;
     }
@@ -344,7 +429,7 @@ class SocketAddress
 
     void getIPv6Address( IPV6ADDRESS& address ) const
     {
-        memcpy( address, mIPv6Address, sizeof( unsigned char ) * 16 );
+        memcpy( address, mIPv6Address, sizeof( IPV6ADDRESS ) );
     }
     
     IPV6FLOWINFO getIPv6FlowInfo() const
@@ -378,13 +463,21 @@ class SocketAddress
 
 
 
-//
-//
-//
-
+/**
+ * This class sends/receives messages to/from sockets.
+ */
 class Socket
 {
     public:
+
+    /**
+     * Construct a connectionless socket
+     */
+    Socket()
+    {
+        int family = AF_UNSPEC, socketType = SOCK_DGRAM, protocol = 0;
+        mSocketDescriptor = socket( family, socketType, protocol );
+    }
     
     Socket( int socketDescriptor, PORT port, IPV4ADDRESS ipv4 ) :
         mSocketDescriptor( socketDescriptor ),
@@ -413,19 +506,41 @@ class Socket
         ::close( mSocketDescriptor );
     }
     
-    size_t send( const void* buffer, size_t size )
+    ssize_t send( const void* buffer, ssize_t size )
     {
+        ssize_t totalSentSize = -1;
+
         if ( mSocketDescriptor != -1 )
         {
-            return ::send( mSocketDescriptor, buffer, size, 0 );
+            totalSentSize = ::send( mSocketDescriptor, buffer, size, 0 );
+            
+            if ( totalSentSize != - 1 )
+            {
+                ssize_t remainingSize = size - totalSentSize;
+
+                while ( remainingSize > 0 )
+                {
+                    ssize_t sentSize = ::send( mSocketDescriptor, (reinterpret_cast<const char*>(buffer) + totalSentSize), remainingSize, 0 );
+                    
+                    if ( sentSize != -1 )
+                    {
+                        totalSentSize += sentSize;
+                        remainingSize = size - totalSentSize;
+                    }
+                    else
+                    {
+                        remainingSize = -1;
+                    }
+                }
+            }
         }
-        
-        return 0;
+
+        return totalSentSize;
     }
     
-    size_t receive( void *buffer, size_t size )
+    ssize_t receive( void* buffer, ssize_t size )
     {
-        if ( mSocketDescriptor )
+        if ( mSocketDescriptor != -1 )
         {
             return ::recv( mSocketDescriptor, buffer, size, 0 );
         }
@@ -433,20 +548,103 @@ class Socket
         return 0;
     }
     
-//    int sentTo( const SocketAddress& receiver )
-//    {
-//        ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen);
-//        return 0;
-//    }
-//    
-//    int receiveFrom( const SocketAddress& sender )
-//    {
-//        ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
-//        return 0;
-//    }
+    ssize_t sendTo( const SocketAddress& receiver, const void* buffer, ssize_t size )
+    {
+        ssize_t totalSentSize = -1;
+
+        if ( mSocketDescriptor != -1 )
+        {
+            struct sockaddr address;
+            size_t addressSize;
+            
+            convertAddress( receiver, address, addressSize );
+            
+            totalSentSize = ::sendto( mSocketDescriptor, buffer, size, 0, &address, addressSize );
+            
+            if ( totalSentSize != - 1 )
+            {
+                ssize_t remainingSize = size - totalSentSize;
+
+                while ( remainingSize > 0 )
+                {
+                    ssize_t sentSize = ::sendto( mSocketDescriptor, (reinterpret_cast<const char*>(buffer) + totalSentSize), remainingSize, 0, &address, addressSize );
+                    
+                    if ( sentSize != -1 )
+                    {
+                        totalSentSize += sentSize;
+                        remainingSize = size - totalSentSize;
+                    }
+                    else
+                    {
+                        remainingSize = -1;
+                    }
+                }
+            }
+        }
+
+        return totalSentSize;
+    }
+    
+    ssize_t receiveFrom( const SocketAddress& sender, void* buffer, ssize_t size )
+    {
+        if ( mSocketDescriptor != -1 )
+        {
+            struct sockaddr address;
+            socklen_t addressSize;
+            
+            convertAddress( sender, address, addressSize );
+
+            return ::recvfrom( mSocketDescriptor, buffer, size, 0, &address, &addressSize);
+        }
+
+        return 0;
+    }
     
 
     private:
+        
+    void convertAddress( const SocketAddress& socketAddress, struct sockaddr& address, socklen_t& addressSize )
+    {
+        size_t size;
+        convertAddress( socketAddress, address, size );
+        addressSize = static_cast<socklen_t>( size );
+    }
+    
+    void convertAddress( const SocketAddress& socketAddress, struct sockaddr& address, size_t& addressSize )
+    {
+        memset( &address, 0, sizeof( sockaddr ) );
+
+        int family = AF_UNSPEC;
+
+        SocketParameterConverter::getParam( socketAddress.getFamily(), family );
+
+        if ( socketAddress.getFamily() == SocketFamily::IPV4 )
+        {
+            addressSize = sizeof( sockaddr_in );
+            struct sockaddr_in* addressIPv4 = reinterpret_cast< struct sockaddr_in* >( &address );
+            IPV4ADDRESS ipv4 = 0;
+
+            socketAddress.getIPv4Address( ipv4 );
+
+            addressIPv4->sin_family = family;
+            addressIPv4->sin_port = htons( socketAddress.getPort() );
+            addressIPv4->sin_addr.s_addr = htonl( ipv4 );
+        }
+        else
+        {
+            addressSize = sizeof( sockaddr_in6 );
+            struct sockaddr_in6* addressIPv6 = reinterpret_cast< struct sockaddr_in6* >( &address );
+            IPV6ADDRESS ipv6;
+
+            socketAddress.getIPv6Address( ipv6 );
+
+            addressIPv6->sin6_family = family;
+            addressIPv6->sin6_port = htons( socketAddress.getPort() );
+            addressIPv6->sin6_flowinfo = socketAddress.getIPv6FlowInfo();
+            memcpy( addressIPv6->sin6_addr.s6_addr, ipv6, sizeof( IPV6ADDRESS ) );
+            addressIPv6->sin6_scope_id = socketAddress.getIPv6ScopeId();
+        }
+    }
 
     int mSocketDescriptor;
     
@@ -459,20 +657,127 @@ class Socket
 };
 
 
-
-//
-//
-//
-
-class ServerSocket
+/**
+ * This is a superclass for server and client sockets.
+ */
+class SocketHandler
 {
     public:
     
-    ServerSocket() : mSocketDescriptor(-1), mBacklog(10)
+    SocketHandler() : mSocketDescriptor(-1)
+    {
+    }
+    
+    virtual ~SocketHandler()
+    {
+    }
+    
+    size_t getSocketAddressCount()
+    {
+        return mSocketAddressList.size();
+    }
+
+    const SocketAddress* getSocketAddress( size_t index )
+    {
+        if ( index < mSocketAddressList.size() )
+        {
+            return &mSocketAddressList[index];
+        }
+
+        return nullptr;
+    }
+    
+    void close()
+    {
+        ::close( mSocketDescriptor );
+        mSocketDescriptor = -1;
+    }
+
+    protected:
+        
+    void fillSocketAddress( struct addrinfo* serverInfo )
+    {
+        int count = 0;
+        struct addrinfo* p = serverInfo;
+
+        // Reserve vector size based on list size
+        while ( p != nullptr )
+        {
+            count++;
+            p = p->ai_next;
+        }
+        
+        mSocketAddressList.clear();
+        mSocketAddressList.reserve( count );
+
+        p = serverInfo;
+        while ( p != nullptr )
+        {
+            SocketAddress socketAddress;
+
+            SocketFlags flags;
+            SocketParameterConverter::getParam( p->ai_flags, flags );
+            socketAddress.setFlags( flags );
+
+            SocketFamily family;
+            SocketParameterConverter::getParam( p->ai_family, family );
+            socketAddress.setFamily( family );
+
+            SocketType socketType;
+            SocketParameterConverter::getParam( p->ai_socktype, socketType );
+            socketAddress.setSocketType( socketType );
+
+            SocketProtocol protocol;
+            SocketParameterConverter::getParam( p->ai_protocol, protocol );
+            socketAddress.setProtocol( protocol );
+
+            // IPv4
+            if ( p->ai_family == AF_INET )
+            {
+                struct sockaddr_in* addr = reinterpret_cast< struct sockaddr_in* >( p->ai_addr );
+                socketAddress.setPort( ntohs( addr->sin_port ) );
+                socketAddress.setIPv4Address( ntohl( addr->sin_addr.s_addr ) );
+            }
+            // IPv6
+            else if ( p->ai_family == AF_INET6 )
+            {
+                struct sockaddr_in6* addr = reinterpret_cast< struct sockaddr_in6* >( p->ai_addr );
+                socketAddress.setPort( ntohs( addr->sin6_port ) );
+                socketAddress.setIPv6Address( addr->sin6_addr.s6_addr );
+                socketAddress.setIPv6FlowInfo( addr->sin6_flowinfo );
+                socketAddress.setIPv6ScopeId( addr->sin6_scope_id );
+            }
+
+            if ( p->ai_canonname != nullptr )
+            {
+                std::string canonicalName = p->ai_canonname;
+                socketAddress.setCanonicalHostname( canonicalName );
+            }
+
+            mSocketAddressList.push_back( socketAddress );
+
+            p = p->ai_next;
+        }
+    }
+
+    int mSocketDescriptor;
+    std::vector< SocketAddress > mSocketAddressList;
+};
+
+
+
+/**
+ * This class creates a server socket.
+ */
+class ServerSocket : public SocketHandler
+{
+    public:
+    
+    ServerSocket() : SocketHandler(), mBacklog(10)
     {
     }
 
-    ServerSocket( int backlog ) : mSocketDescriptor(-1), mBacklog( backlog )
+    ServerSocket( int backlog ) : SocketHandler(), mBacklog( backlog )
     {
     }
     
@@ -495,6 +800,11 @@ class ServerSocket
     
     bool setup( const std::string& port, SocketType socketType = SocketType::STREAM )
     {
+        if ( mSocketDescriptor != -1 )
+        {
+            close();
+        }
+        
         struct addrinfo hints;
         struct addrinfo* serverInfo;
         int type = SOCK_STREAM;
@@ -524,23 +834,14 @@ class ServerSocket
         return true;
     }
     
-    size_t getSocketAddressCount()
+    bool start( size_t socketAddressIndex )
     {
-        return mSocketAddressList.size();
-    }
-
-    const SocketAddress* getSocketAddress( size_t index )
-    {
-        if ( index < mSocketAddressList.size() )
+        if ( mSocketDescriptor != -1 )
         {
-            return &mSocketAddressList[index];
+            std::cerr << "ServerSocket error: socket already bound.\n";
+            return false;
         }
-
-        return nullptr;
-    }
-
-    bool bind( size_t socketAddressIndex )
-    {
+        
         if ( socketAddressIndex >= mSocketAddressList.size() )
         {
             std::cerr << "ServerSocket error: invalid socket address index.\n";
@@ -550,23 +851,21 @@ class ServerSocket
         SocketAddress& socketAddress = mSocketAddressList[socketAddressIndex];
 
         int family = AF_UNSPEC, socketType = SOCK_STREAM, protocol = 0;
-
         SocketParameterConverter::getParam( socketAddress.getFamily(), family );
         SocketParameterConverter::getParam( socketAddress.getSocketType(), socketType );
         SocketParameterConverter::getParam( socketAddress.getProtocol(), protocol );
 
         mSocketDescriptor = socket( family, socketType, protocol );
-
         if ( mSocketDescriptor == -1 )
         {
-            std::cerr << "ServerSocket error: socket()\n";
+            std::cerr << "ServerSocket error: file descriptor creation failed.\n";
             return false;
         }
 
         // Specifies that the rules used in validating addresses supplied to bind()
         // should allow reuse of local addresses, if this is supported by the protocol.
         int yes = 1;
-        int status = setsockopt( mSocketDescriptor, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int) );
+        int status = setsockopt( mSocketDescriptor, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof( int ) );
 
         if ( status == -1 )
         {
@@ -574,6 +873,7 @@ class ServerSocket
             return false;
         }
 
+        // Fill with the server address
         struct sockaddr address;
         size_t addressSize;
         memset( &address, 0, sizeof(sockaddr) );
@@ -587,8 +887,8 @@ class ServerSocket
             socketAddress.getIPv4Address( ipv4 );
 
             addressIPv4->sin_family = family;
-            addressIPv4->sin_port = socketAddress.getPort();
-            addressIPv4->sin_addr.s_addr = ipv4;
+            addressIPv4->sin_port = htons( socketAddress.getPort() );
+            addressIPv4->sin_addr.s_addr = htonl( ipv4 );
         }
         else
         {
@@ -599,7 +899,7 @@ class ServerSocket
             socketAddress.getIPv6Address( ipv6 );
 
             addressIPv6->sin6_family = family;
-            addressIPv6->sin6_port = socketAddress.getPort();
+            addressIPv6->sin6_port = htons( socketAddress.getPort() );
             addressIPv6->sin6_flowinfo = socketAddress.getIPv6FlowInfo();
             memcpy( addressIPv6->sin6_addr.s6_addr, ipv6, sizeof( IPV6ADDRESS ) );
             addressIPv6->sin6_scope_id = socketAddress.getIPv6ScopeId();
@@ -608,20 +908,16 @@ class ServerSocket
         status = ::bind( mSocketDescriptor, &address, addressSize );
         if ( status == -1 )
         {
-            this->close();
-            std::cerr << "ServerSocket error: bind()\n";
+            close();
+            std::cerr << "ServerSocket error: Error while binding address to the socket.\n";
             return false;
         }
-
-        return true;
-    }
-    
-    bool listen()
-    {
-        int status = ::listen( mSocketDescriptor, mBacklog );
+        
+        status = ::listen( mSocketDescriptor, mBacklog );
         if ( status == -1 )
         {
-            std::cerr << "ServerSocket error: listen()\n";
+            close();
+            std::cerr << "ServerSocket error: Cannot starting listening.\n";
             return false;
         }
 
@@ -655,21 +951,18 @@ class ServerSocket
         struct sockaddr* connectorSockAddr = reinterpret_cast<struct sockaddr*>( &connectorAddress );
         if ( connectorSockAddr && connectorSockAddr->sa_family ==  AF_INET )
         {
-            SocketFamily family;
             PORT port;
             IPV4ADDRESS ipv4;
 
             struct sockaddr_in* address = reinterpret_cast<struct sockaddr_in*>( connectorSockAddr);
 
-            SocketParameterConverter::getParam( address->sin_family, family );
             port = ntohs( address->sin_port );
             ipv4 = ntohl( address->sin_addr.s_addr );
 
             socket = new Socket( socketDescriptor, port, ipv4 );
         }
-        else
+        else if ( connectorSockAddr && connectorSockAddr->sa_family ==  AF_INET6 )
         {
-            SocketFamily family;
             PORT port;
             IPV6ADDRESS ipv6;
             IPV6FLOWINFO ipv6FlowInfo;
@@ -677,7 +970,6 @@ class ServerSocket
 
             struct sockaddr_in6* address = reinterpret_cast<struct sockaddr_in6*>( connectorSockAddr);
 
-            SocketParameterConverter::getParam( address->sin6_family, family );
             port = ntohs( address->sin6_port );
             memcpy( ipv6, address->sin6_addr.s6_addr, sizeof( IPV6ADDRESS ) );
             ipv6FlowInfo = address->sin6_flowinfo;
@@ -688,94 +980,22 @@ class ServerSocket
 
         return socket;
     }
-    
-    void close()
-    {
-        ::close( mSocketDescriptor );
-        mSocketDescriptor = -1;
-    }
 
     private:
 
-    void fillSocketAddress( struct addrinfo* serverInfo )
-    {
-        int count = 0;
-        struct addrinfo* p = serverInfo;
-
-        // Reserve vector size based on list size
-        while ( p != nullptr )
-        {
-            count++;
-            p = p->ai_next;
-        }
-        mSocketAddressList.reserve( count );
-
-        p = serverInfo;
-        while ( p != nullptr )
-        {
-            SocketAddress socketAddress;
-
-            SocketFlags flags;
-            SocketParameterConverter::getParam( p->ai_flags, flags );
-            socketAddress.setFlags( flags );
-
-            SocketFamily family;
-            SocketParameterConverter::getParam( p->ai_family, family );
-            socketAddress.setFamily( family );
-
-            SocketType socketType;
-            SocketParameterConverter::getParam( p->ai_socktype, socketType );
-            socketAddress.setSocketType( socketType );
-
-            SocketProtocol protocol;
-            SocketParameterConverter::getParam( p->ai_protocol, protocol );
-            socketAddress.setProtocol( protocol );
-
-            // IPv4
-            if ( p->ai_family == AF_INET )
-            {
-                struct sockaddr_in* addr = reinterpret_cast< struct sockaddr_in* >( p->ai_addr );
-                socketAddress.setPort( ntohs( addr->sin_port ) );
-                socketAddress.setIPv4Address( addr->sin_addr.s_addr );
-            }
-            // IPv6
-            else if ( p->ai_family == AF_INET6 )
-            {
-                struct sockaddr_in6* addr = reinterpret_cast< struct sockaddr_in6* >( p->ai_addr );
-                socketAddress.setPort( ntohs( addr->sin6_port ) );
-                socketAddress.setIPv6Address( addr->sin6_addr.s6_addr );
-                socketAddress.setIPv6FlowInfo( ntohl( addr->sin6_flowinfo ) );
-                socketAddress.setIPv6ScopeId( ntohl( addr->sin6_scope_id ) );
-            }
-
-            if ( p->ai_canonname != nullptr )
-            {
-                std::string canonicalName = p->ai_canonname;
-                socketAddress.setCanonicalHostname( canonicalName );
-            }
-
-            mSocketAddressList.push_back( socketAddress );
-
-            p = p->ai_next;
-        }
-    }
-
-    int mSocketDescriptor;
     int mBacklog;
-    std::vector< SocketAddress > mSocketAddressList;
 };
 
 
 
-//
-//
-//
-
-class ClientSocket
+/**
+ * This class creates a client socket.
+ */
+class ClientSocket : public SocketHandler
 {
     public:
     
-    ClientSocket() : mSocketDescriptor(-1)
+    ClientSocket() : SocketHandler()
     {
     }
 
@@ -820,21 +1040,6 @@ class ClientSocket
 
         return true;
     }
-    
-    size_t getSocketAddressCount()
-    {
-        return mSocketAddressList.size();
-    }
-
-    const SocketAddress* getSocketAddress( size_t index )
-    {
-        if ( index < mSocketAddressList.size() )
-        {
-            return &mSocketAddressList[index];
-        }
-
-        return nullptr;
-    }
 
     Socket* connect( size_t socketAddressIndex )
     {
@@ -847,7 +1052,6 @@ class ClientSocket
         SocketAddress& socketAddress = mSocketAddressList[socketAddressIndex];
 
         int family = AF_UNSPEC, socketType = SOCK_STREAM, protocol = 0;
-
         SocketParameterConverter::getParam( socketAddress.getFamily(), family );
         SocketParameterConverter::getParam( socketAddress.getSocketType(), socketType );
         SocketParameterConverter::getParam( socketAddress.getProtocol(), protocol );
@@ -856,7 +1060,7 @@ class ClientSocket
 
         if ( mSocketDescriptor == -1 )
         {
-            std::cerr << "ClientSocket error: socket()\n";
+            std::cerr << "ClientSocket error: file descriptor creation failed.\n";
             return nullptr;
         }
 
@@ -875,8 +1079,8 @@ class ClientSocket
             socketAddress.getIPv4Address( ipv4 );
 
             addressIPv4->sin_family = family;
-            addressIPv4->sin_port = socketAddress.getPort();
-            addressIPv4->sin_addr.s_addr = ipv4;
+            addressIPv4->sin_port = htons( socketAddress.getPort() );
+            addressIPv4->sin_addr.s_addr = htonl( ipv4 );
 
             socket = new Socket( mSocketDescriptor, socketAddress.getPort(), ipv4 );
         }
@@ -889,7 +1093,7 @@ class ClientSocket
             socketAddress.getIPv6Address( ipv6 );
 
             addressIPv6->sin6_family = family;
-            addressIPv6->sin6_port = socketAddress.getPort();
+            addressIPv6->sin6_port = htons( socketAddress.getPort() );
             addressIPv6->sin6_flowinfo = socketAddress.getIPv6FlowInfo();
             memcpy( addressIPv6->sin6_addr.s6_addr, ipv6, sizeof( IPV6ADDRESS ) );
             addressIPv6->sin6_scope_id = socketAddress.getIPv6ScopeId();
@@ -901,85 +1105,10 @@ class ClientSocket
         if ( status == -1 )
         {
             this->close();
-            std::cerr << "ClientSocket error: connect()\n";
+            std::cerr << "ClientSocket error: Cannot connect.\n";
             return nullptr;
         }
 
         return socket;
     }
-
-    void close()
-    {
-        ::close( mSocketDescriptor );
-        mSocketDescriptor = -1;
-    }
-
-    private:
-
-    void fillSocketAddress( struct addrinfo* serverInfo )
-    {
-        int count = 0;
-        struct addrinfo* p = serverInfo;
-
-        // Reserve vector size based on list size
-        while ( p != nullptr )
-        {
-            count++;
-            p = p->ai_next;
-        }
-        mSocketAddressList.reserve( count );
-
-        p = serverInfo;
-        while ( p != nullptr )
-        {
-            SocketAddress socketAddress;
-
-            SocketFlags flags;
-            SocketParameterConverter::getParam( p->ai_flags, flags );
-            socketAddress.setFlags( flags );
-
-            SocketFamily family;
-            SocketParameterConverter::getParam( p->ai_family, family );
-            socketAddress.setFamily( family );
-
-            SocketType socketType;
-            SocketParameterConverter::getParam( p->ai_socktype, socketType );
-            socketAddress.setSocketType( socketType );
-
-            SocketProtocol protocol;
-            SocketParameterConverter::getParam( p->ai_protocol, protocol );
-            socketAddress.setProtocol( protocol );
-
-            // IPv4
-            if ( p->ai_family == AF_INET )
-            {
-                struct sockaddr_in* addr = reinterpret_cast< struct sockaddr_in* >( p->ai_addr );
-                socketAddress.setPort( ntohs( addr->sin_port ) );
-                socketAddress.setIPv4Address( addr->sin_addr.s_addr );
-            }
-            // IPv6
-            else if ( p->ai_family == AF_INET6 )
-            {
-                struct sockaddr_in6* addr = reinterpret_cast< struct sockaddr_in6* >( p->ai_addr );
-                socketAddress.setPort( ntohs( addr->sin6_port ) );
-                socketAddress.setIPv6Address( addr->sin6_addr.s6_addr );
-                socketAddress.setIPv6FlowInfo( ntohl( addr->sin6_flowinfo ) );
-                socketAddress.setIPv6ScopeId( ntohl( addr->sin6_scope_id ) );
-            }
-
-            if ( p->ai_canonname != nullptr )
-            {
-                std::string canonicalName = p->ai_canonname;
-                socketAddress.setCanonicalHostname( canonicalName );
-            }
-
-            mSocketAddressList.push_back( socketAddress );
-
-            p = p->ai_next;
-        }
-    }
-
-    int mSocketDescriptor;
-    std::vector< SocketAddress > mSocketAddressList;
 };
-
