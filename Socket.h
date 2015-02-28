@@ -3,32 +3,48 @@
  * 
  * EXAMPLE OF USE:
  * 
- * SERVER EXAMPLE
+ *    /// SERVER EXAMPLE ///
+ * 
  *    #include <iostream>
  *    #include "Socket.h"
  * 
  *    int main()
- *     {
- *        ServerSocket server( 50 );
- *    
- *         if ( server.setup( "3490" ) )
- *         {
- *             size_t addressCount = server.getSocketAddressCount();
+ *    {
+ *        ServerSocket server( 50 ); // 50 is the backlog
  *
- *             int address;
+ *        // Setup server to use port 3490
+ *        if ( server.setup( "3490" ) )
+ *        {
+ *            // Setup will fill a list of address
+ *            size_t addressCount = server.getSocketAddressCount();
+ *
+ *            int address;
  *            for (size_t i = 0; i < addressCount; ++i)
  *            {
  *                const SocketAddress* socketAddress = server.getSocketAddress( i );
  *
- *                // Choose an address based in some criteria
+ *                // You can choose wich address to use based in your own criteria
+ *                // socketAddress->getFlags()
+ *                // socketAddress->getFamily()
+ *                // socketAddress->getSocketType()
+ *                // socketAddress->getProtocol()
+ *                // socketAddress->getPort()
+ *                // socketAddress->getIPv4Address( std::string )
+ *                // socketAddress->getIPv6Address( std::string )
+ *                // socketAddress->getIPv6FlowInfo()
+ *                // socketAddress->getIPv6ScopeId()
+ *                // socketAddress->getCanonicalHostname()
+ * 
  *                address = i;
  *            }
  *    
  *            if ( server.start( address ) )
  *            {
- *                // Wait for connection
- *               Socket* socket = server.accept();
+ *                // Wait for connection. The caller has the ownership of
+ *                // socket, so is up to the caller to delete it.
+ *                Socket* socket = server.accept();
  * 
+ *                // This block might be in a thread
  *                if ( socket != nullptr )
  *                {
  *                    char* buffer = new char[bufferSize];
@@ -54,36 +70,71 @@
  *    }
  * 
  * 
- * CLIENT EXAMPLE
+ *    /// CLIENT EXAMPLE ///
+ * 
  *    #include <iostream>
  *    #include "Socket.h"
  * 
  *    int main()
- *     {
+ *    {
  *        ClientSocket client;
- *    
- *         if ( client.setup( "192.168.0.1", "3490" ) )
- *         {
- *             size_t addressCount = client.getSocketAddressCount();
+ * 
+ *        // Setup client to connect to 192.168.0.1/3490
+ *        if ( client.setup( "192.168.0.1", "3490" ) )
+ *        {
+ *            // Setup will fill a list of address
+ *            size_t addressCount = client.getSocketAddressCount();
  *
  *            int address;
  *            for (size_t i = 0; i < addressCount; ++i)
  *            {
  *                const SocketAddress* socketAddress = client.getSocketAddress( i );
  *
- *                // Choose an address based in some criteria
+ *                // This is the same as SERVER EXAMPLE above
+ *                // ...
+ * 
  *                address = i;
  *            }
  *
+ *            // Connect to server using the choosen SocketAddress. The caller
+ *            // has the ownership of socket, so is up to the caller to delete it.
  *            Socket* socket = client.connect( address );
  * 
+ *            // This block might be in a thread
  *            if ( socket != nullptr )
  *            {
- *                // This step is the same as in SERVER EXAMPLE
+ *                // This is the same as in SERVER EXAMPLE
+ *                // ...
+ *
+ *                delete socket;
  *            }
  * 
  *            client.close();
  *        }
+ *        
+ *        return 0;
+ *    }
+ * 
+ *    /// CONNECTIONLESS EXAMPLE ///
+ * 
+ *    #include <iostream>
+ *    #include "Socket.h"
+ * 
+ *    int main()
+ *    {
+ *        // Hold information about who you going to send/receive messages
+ *        SocketAddress serverAddress;
+ * 
+ *        // Fill serverAddress with information about the server
+ *        // ...
+ * 
+ *        Socket socket;
+ * 
+ *        // Send data
+ *        ssize_t sent = socket.sendTo( serverAddress, buffer, size );
+ * 
+ *        // Receive data
+ *        ssize_t received = socket.receiveFrom( serverAddress, buffer, size );
  *        
  *        return 0;
  *    }
@@ -98,6 +149,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <errno.h>
 
 
 
@@ -473,10 +525,30 @@ class Socket
     /**
      * Construct a connectionless socket
      */
-    Socket()
+    Socket( SocketFamily family )
     {
-        int family = AF_UNSPEC, socketType = SOCK_DGRAM, protocol = 0;
-        mSocketDescriptor = socket( family, socketType, protocol );
+        int socketFamily = AF_INET, socketType = SOCK_DGRAM, socketProtocol = 0;
+        
+        switch ( family )
+        {
+            case SocketFamily::IPV4:
+                socketFamily = AF_INET;
+                break;
+                
+            case SocketFamily::IPV6:
+                socketFamily = AF_INET6;
+                break;
+
+            default:
+                break;
+        }
+
+        mSocketDescriptor = socket( socketFamily, socketType, socketProtocol );
+        
+        if ( mSocketDescriptor == -1 )
+        {
+            std::cerr << "Socket error: " << strerror(errno) << "\n";
+        }
     }
     
     Socket( int socketDescriptor, PORT port, IPV4ADDRESS ipv4 ) :
@@ -532,6 +604,11 @@ class Socket
                         remainingSize = -1;
                     }
                 }
+            }
+            
+            if ( totalSentSize == - 1 )
+            {
+                std::cerr << "Socket error: send(). " << strerror(errno) << "\n";
             }
         }
 
@@ -917,12 +994,119 @@ class ServerSocket : public SocketHandler
         if ( status == -1 )
         {
             close();
-            std::cerr << "ServerSocket error: Cannot starting listening.\n";
+            std::cerr << "ServerSocket error: Trying listening. " << strerror(errno) << "\n";
             return false;
         }
 
         return true;
     }
+    
+    Socket* startConnectionless( size_t socketAddressIndex )
+    {
+        if ( mSocketDescriptor != -1 )
+        {
+            std::cerr << "ServerSocket error: socket already bound.\n";
+            return nullptr;
+        }
+
+        if ( socketAddressIndex >= mSocketAddressList.size() )
+        {
+            std::cerr << "ServerSocket error: invalid socket address index.\n";
+            return nullptr;
+        }
+
+        SocketAddress& socketAddress = mSocketAddressList[socketAddressIndex];
+
+        int family = AF_UNSPEC, socketType = SOCK_DGRAM, protocol = 0;
+        SocketParameterConverter::getParam( socketAddress.getFamily(), family );
+        SocketParameterConverter::getParam( socketAddress.getSocketType(), socketType );
+        SocketParameterConverter::getParam( socketAddress.getProtocol(), protocol );
+        
+        if ( socketType != SOCK_DGRAM )
+        {
+            std::cerr << "ServerSocket error: It must be a datagram connection.\n";
+            return nullptr;
+        }
+
+        mSocketDescriptor = socket( family, socketType, protocol );
+        if ( mSocketDescriptor == -1 )
+        {
+            std::cerr << "ServerSocket error: file descriptor creation failed.\n";
+            return nullptr;
+        }
+
+        // Specifies that the rules used in validating addresses supplied to bind()
+        // should allow reuse of local addresses, if this is supported by the protocol.
+        int yes = 1;
+        int status = setsockopt( mSocketDescriptor, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof( int ) );
+
+        if ( status == -1 )
+        {
+            std::cerr << "ServerSocket error: setsockopt()\n";
+            return nullptr;
+        }
+
+        // Fill with the server address
+        struct sockaddr address;
+        size_t addressSize;
+        memset( &address, 0, sizeof(sockaddr) );
+
+        if ( socketAddress.getFamily() == SocketFamily::IPV4 )
+        {
+            addressSize = sizeof( sockaddr_in );
+            struct sockaddr_in* addressIPv4 = reinterpret_cast< struct sockaddr_in* >( &address );
+            IPV4ADDRESS ipv4 = 0;
+
+            socketAddress.getIPv4Address( ipv4 );
+
+            addressIPv4->sin_family = family;
+            addressIPv4->sin_port = htons( socketAddress.getPort() );
+            addressIPv4->sin_addr.s_addr = htonl( ipv4 );
+        }
+        else
+        {
+            addressSize = sizeof( sockaddr_in6 );
+            struct sockaddr_in6* addressIPv6 = reinterpret_cast< struct sockaddr_in6* >( &address );
+            IPV6ADDRESS ipv6;
+
+            socketAddress.getIPv6Address( ipv6 );
+
+            addressIPv6->sin6_family = family;
+            addressIPv6->sin6_port = htons( socketAddress.getPort() );
+            addressIPv6->sin6_flowinfo = socketAddress.getIPv6FlowInfo();
+            memcpy( addressIPv6->sin6_addr.s6_addr, ipv6, sizeof( IPV6ADDRESS ) );
+            addressIPv6->sin6_scope_id = socketAddress.getIPv6ScopeId();
+        }
+
+        status = ::bind( mSocketDescriptor, &address, addressSize );
+        if ( status == -1 )
+        {
+            close();
+            std::cerr << "ServerSocket error: Error while binding address to the socket.\n";
+            return nullptr;
+        }
+        
+        Socket* socket = nullptr;
+
+        if ( family ==  AF_INET )
+        {
+            IPV4ADDRESS ipv4;
+            socketAddress.getIPv4Address( ipv4 );
+
+            socket = new Socket( mSocketDescriptor, socketAddress.getPort(), ipv4 );
+        }
+        else if ( family == AF_INET6 )
+        {
+            IPV6ADDRESS ipv6;
+            socketAddress.getIPv6Address( ipv6 );
+
+            socket = new Socket( mSocketDescriptor, socketAddress.getPort(), ipv6, socketAddress.getIPv6FlowInfo(), socketAddress.getIPv6ScopeId() );
+        }
+
+        return socket;
+    }
+    
+    
     
     Socket* accept()
     {
@@ -942,7 +1126,7 @@ class ServerSocket : public SocketHandler
 
         if ( socketDescriptor == -1 )
         {
-            std::cerr << "ServerSocket error: accept().\n";
+            std::cerr << "ServerSocket error: " << strerror(errno) << "\n";
             return nullptr;
         }
 
